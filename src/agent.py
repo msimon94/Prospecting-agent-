@@ -21,7 +21,8 @@ class ProspectingAgent:
         self._cfg = config
 
         self._discoverer = ContactDiscoverer(
-            hunter_api_key=config.get("hunter_api_key")
+            apollo_api_key=config.get("apollo_api_key"),
+            leadiq_api_key=config.get("leadiq_api_key"),
         )
         self._email_gen = EmailGenerator(config["anthropic_api_key"])
         self._gmail = GmailClient(
