@@ -1,19 +1,26 @@
+"""
+In-memory + file-backed deduplication store.
+
+For list-based outreach we deduplicate on email address so the same
+contact is never emailed twice across runs, even if they appear in
+multiple imported files.
+"""
+
 import json
 import hashlib
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import List
 
-from ..signals.base import CompanySignal
+from ..signals.base import Contact
 
 
-class SignalDeduplicator:
-    """
-    File-backed deduplication store. Prevents re-emailing the same
-    company+signal combo within the TTL window.
-    """
-
-    def __init__(self, state_file: str = ".agent_state/dedup.json", ttl_days: int = 30):
+class ContactDeduplicator:
+    def __init__(
+        self,
+        state_file: str = ".agent_state/dedup.json",
+        ttl_days: int = 90,
+    ):
         self._path = Path(state_file)
         self.ttl_days = ttl_days
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -33,8 +40,8 @@ class SignalDeduplicator:
 
     # ── helpers ───────────────────────────────────────────────────────────────
 
-    def _key(self, namespace: str, value: str) -> str:
-        return hashlib.md5(f"{namespace}:{value}".encode()).hexdigest()
+    def _key(self, email: str) -> str:
+        return hashlib.md5(email.strip().lower().encode()).hexdigest()
 
     def _purge_expired(self) -> None:
         cutoff = (datetime.utcnow() - timedelta(days=self.ttl_days)).isoformat()
@@ -42,25 +49,25 @@ class SignalDeduplicator:
 
     # ── public API ────────────────────────────────────────────────────────────
 
-    def filter_new(self, signals: List[CompanySignal]) -> List[CompanySignal]:
-        """Return only signals not seen within the TTL window, recording them."""
+    def filter_new(self, contacts: List[Contact]) -> List[Contact]:
+        """Return contacts not emailed within the TTL window."""
         self._purge_expired()
-        new: List[CompanySignal] = []
-        for signal in signals:
-            key = self._key(signal.signal_type.value, signal.company_domain)
+        new: List[Contact] = []
+        for contact in contacts:
+            if not contact.email:
+                continue
+            key = self._key(contact.email)
             if key not in self._store:
-                new.append(signal)
-                self._store[key] = datetime.utcnow().isoformat()
-        self._save()
+                new.append(contact)
         return new
 
-    def mark_emailed(self, domain: str) -> None:
-        key = self._key("emailed", domain)
+    def mark_sent(self, email: str) -> None:
+        key = self._key(email)
         self._store[key] = datetime.utcnow().isoformat()
         self._save()
 
-    def already_emailed(self, domain: str) -> bool:
-        key = self._key("emailed", domain)
+    def already_sent(self, email: str) -> bool:
+        key = self._key(email)
         if key not in self._store:
             return False
         ts = datetime.fromisoformat(self._store[key])
