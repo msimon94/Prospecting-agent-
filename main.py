@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-AI Prospecting Agent CLI
+AI Prospecting Agent
 
-Usage:
-  python main.py auth                           # Authorize Gmail (run once)
-  python main.py run companies.csv              # Run against a company list
-  python main.py run companies.csv --dry-run    # Preview emails, don't send
-  python main.py run companies.csv --max 10     # Cap emails this run
+Commands
+--------
+auth                   Run Gmail OAuth flow (once)
+run   COMPANY_FILE     Discover contacts + send emails
+                         --queue     Save to review queue instead of sending
+                         --dry-run   Generate only, don't send or queue
+                         --max N     Cap companies processed this run
+serve                  Start the review dashboard on http://localhost:5000
 """
 import asyncio
 
@@ -22,7 +25,7 @@ console = Console()
 
 @click.group()
 def cli():
-    """AI Prospecting Agent — import a company list, auto-find contacts, send personalized outreach."""
+    """AI Prospecting Agent — import companies, find contacts, send personalized outreach."""
     pass
 
 
@@ -42,16 +45,16 @@ def auth():
 
 @cli.command()
 @click.argument("company_file", type=click.Path(exists=True))
-@click.option("--dry-run", is_flag=True, help="Find contacts and generate emails, but don't send.")
+@click.option("--queue",    "use_queue", is_flag=True, help="Save emails to review queue instead of sending immediately.")
+@click.option("--dry-run",  is_flag=True,               help="Generate emails but don't send or queue them.")
 @click.option("--max", "max_emails", type=int, default=None, help="Cap companies processed this run.")
-def run(company_file: str, dry_run: bool, max_emails: int):
+def run(company_file: str, use_queue: bool, dry_run: bool, max_emails: int):
     """
-    For each company in COMPANY_FILE: discover the best contact
-    (CEO/CRO/VP Sales/Marketing/Ops), generate a personalized email
-    with Claude, and send it from your Gmail inbox.
+    For each company in COMPANY_FILE: discover the best contact, generate a
+    personalized email, then either send it or queue it for dashboard review.
 
     COMPANY_FILE can be .csv or .xlsx.
-    Required columns: domain (or website).
+    Required column: domain (or website).
     Optional: company_name, industry, employee_count, context/notes.
     """
     config = load_config()
@@ -60,8 +63,43 @@ def run(company_file: str, dry_run: bool, max_emails: int):
     if max_emails is not None:
         config["max_emails_per_run"] = max_emails
 
-    agent = ProspectingAgent(config)
+    queue = None
+    if use_queue:
+        from src.queue.email_queue import EmailQueue
+        queue = EmailQueue(config.get("queue_db", ".agent_state/email_queue.db"))
+        console.print(f"[cyan]Queue mode — emails will appear in the dashboard.[/cyan]")
+
+    agent = ProspectingAgent(config, queue=queue)
     asyncio.run(agent.run(company_file))
+
+    if use_queue:
+        console.print("\n[green]Open http://localhost:5000 to review and approve emails.[/green]")
+        console.print("[dim]Start the dashboard with: python main.py serve[/dim]")
+
+
+@cli.command()
+@click.option("--port", default=5000, show_default=True, help="Port to listen on.")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind.")
+def serve(port: int, host: str):
+    """
+    Start the email review dashboard.
+
+    Open http://localhost:5000/dashboard to approve, edit, or reject
+    emails generated with `python main.py run --queue`.
+    """
+    try:
+        from flask import Flask
+    except ImportError:
+        console.print("[red]Flask is not installed. Run: pip install flask[/red]")
+        raise SystemExit(1)
+
+    from src.dashboard.app import create_app
+
+    config = load_config()
+    app = create_app(config)
+
+    console.print(f"[bold green]Dashboard running → http://{host}:{port}/dashboard[/bold green]")
+    app.run(host=host, port=port, debug=False, use_reloader=False)
 
 
 if __name__ == "__main__":

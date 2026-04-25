@@ -17,8 +17,14 @@ console = Console()
 
 
 class ProspectingAgent:
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, queue=None):
+        """
+        queue: an EmailQueue instance.  When provided the agent writes
+               generated emails to SQLite instead of sending immediately.
+               Pass None (default) for direct-send mode.
+        """
         self._cfg = config
+        self._queue = queue  # EmailQueue | None
 
         self._discoverer = ContactDiscoverer(
             apollo_api_key=config.get("apollo_api_key"),
@@ -45,8 +51,11 @@ class ProspectingAgent:
             config.get("log_file", ".agent_state/sent_log.csv")
         )
 
+    # ── Main entry point ──────────────────────────────────────────────────────
+
     async def run(self, company_file: str) -> List[dict]:
-        console.rule("[bold blue]Prospecting Agent")
+        mode = "queue" if self._queue else "send"
+        console.rule(f"[bold blue]Prospecting Agent[/bold blue] [dim]({mode} mode)[/dim]")
 
         console.print(f"Loading companies from [cyan]{company_file}[/cyan]...")
         all_companies = load_companies(company_file)
@@ -81,16 +90,17 @@ class ProspectingAgent:
             if result:
                 results.append(result)
 
-        console.rule(f"[bold green]Done — {len(results)}/{len(batch)} emails sent")
+        action = "queued for review" if self._queue else "emails sent"
+        console.rule(f"[bold green]Done — {len(results)}/{len(batch)} {action}")
         return results
 
-    # ── per-company pipeline ──────────────────────────────────────────────────
+    # ── Per-company pipeline ──────────────────────────────────────────────────
 
     async def _process_company(self, company: Company) -> Optional[dict]:
         console.print(f"\n[bold cyan]{company.name}[/bold cyan] — [dim]{company.domain}[/dim]")
 
         # ── Contact discovery ─────────────────────────────────────────────────
-        console.print("  Discovering contacts (website + LinkedIn + Hunter)...")
+        console.print("  Discovering contacts (Apollo → website → LinkedIn)...")
         try:
             contact = await self._discoverer.discover(company)
         except Exception as e:
@@ -121,13 +131,21 @@ class ProspectingAgent:
 
         console.print(f"  [italic]Subject:[/italic] {email_output.subject}")
 
+        # ── Queue mode: save for dashboard review ─────────────────────────────
+        if self._queue is not None:
+            row_id = self._queue.enqueue(email_output)
+            self._dedup.mark_processed(company.domain)
+            console.print(f"  [cyan]Queued for review (id: {row_id[:8]}…)[/cyan]")
+            return {"queued": True, "id": row_id, "email": email_output}
+
+        # ── Dry-run mode ──────────────────────────────────────────────────────
         if self._cfg.get("dry_run"):
             console.print(f"  [cyan][DRY RUN] Would send to {contact.email}[/cyan]")
             console.print(f"  {email_output.body}")
             self._dedup.mark_processed(company.domain)
             return {"email": email_output, "dry_run": True}
 
-        # ── Send ──────────────────────────────────────────────────────────────
+        # ── Direct send mode ──────────────────────────────────────────────────
         try:
             gmail_id = self._gmail.send(
                 to=contact.email,
@@ -139,7 +157,6 @@ class ProspectingAgent:
             console.print(f"  [red]Send failed: {e}[/red]")
             return None
 
-        # ── Log + dedup ───────────────────────────────────────────────────────
         self._logger.log(email_output, gmail_id)
         self._dedup.mark_processed(company.domain)
 
@@ -151,7 +168,7 @@ class ProspectingAgent:
 
         return {"email": email_output, "gmail_id": gmail_id}
 
-    # ── display ───────────────────────────────────────────────────────────────
+    # ── Display ───────────────────────────────────────────────────────────────
 
     def _print_companies(self, companies: List[Company]) -> None:
         table = Table(title=f"Batch — {len(companies)} companies", show_lines=False)

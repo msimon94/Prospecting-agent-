@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Prospecting Dashboard</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            surface: '#111318',
+            card:    '#1a1d24',
+            border:  '#2a2d36',
+            muted:   '#6b7280',
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+    .tab-active { border-bottom: 2px solid #6366f1; color: #a5b4fc; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #6b7280; }
+    .fade-out { transition: opacity 0.3s, transform 0.3s; opacity: 0; transform: translateY(-8px); }
+    textarea { resize: vertical; }
+    .wc-ok   { background: #052e16; color: #4ade80; }
+    .wc-warn { background: #422006; color: #fb923c; }
+    .wc-over { background: #450a0a; color: #f87171; }
+  </style>
+</head>
+<body class="bg-surface text-gray-200 min-h-screen">
+
+  <!-- ── Header ─────────────────────────────────────────────────────────── -->
+  <header class="border-b border-border px-6 py-4 flex items-center justify-between sticky top-0 bg-surface z-10">
+    <div class="flex items-center gap-3">
+      <div class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold text-sm">P</div>
+      <span class="font-semibold text-gray-100 text-lg">Prospecting</span>
+      <span class="text-muted text-sm ml-1">/ Email Review</span>
+    </div>
+    <div class="flex items-center gap-4 text-sm">
+      <span id="hdr-pending" class="flex items-center gap-1.5">
+        <span class="w-2 h-2 bg-amber-400 rounded-full"></span>
+        <span class="text-muted">Pending</span>
+        <span class="font-semibold text-amber-300" id="hdr-pending-n">—</span>
+      </span>
+      <span id="hdr-sent" class="flex items-center gap-1.5">
+        <span class="w-2 h-2 bg-emerald-400 rounded-full"></span>
+        <span class="text-muted">Sent</span>
+        <span class="font-semibold text-emerald-300" id="hdr-sent-n">—</span>
+      </span>
+      <span id="hdr-rejected" class="flex items-center gap-1.5">
+        <span class="w-2 h-2 bg-red-400 rounded-full"></span>
+        <span class="text-muted">Rejected</span>
+        <span class="font-semibold text-red-300" id="hdr-rejected-n">—</span>
+      </span>
+    </div>
+  </header>
+
+  <!-- ── Tabs ───────────────────────────────────────────────────────────── -->
+  <div class="border-b border-border px-6 flex gap-6">
+    <button onclick="switchTab('pending')"   id="tab-pending"   class="py-3 text-sm font-medium tab-active  transition-colors">Pending</button>
+    <button onclick="switchTab('sent')"      id="tab-sent"      class="py-3 text-sm font-medium tab-inactive transition-colors">Sent</button>
+    <button onclick="switchTab('rejected')"  id="tab-rejected"  class="py-3 text-sm font-medium tab-inactive transition-colors">Rejected</button>
+  </div>
+
+  <!-- ── Main ───────────────────────────────────────────────────────────── -->
+  <main class="max-w-4xl mx-auto px-4 py-6">
+    <div id="email-cards" class="space-y-4"></div>
+  </main>
+
+  <!-- ── Toast ──────────────────────────────────────────────────────────── -->
+  <div id="toast" class="fixed bottom-6 right-6 hidden px-4 py-3 rounded-lg text-sm font-medium shadow-xl z-50 transition-all"></div>
+
+  <script>
+  // ── State ────────────────────────────────────────────────────────────────
+  let currentTab = 'pending';
+
+  // ── Boot ─────────────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {
+    loadCounts();
+    loadEmails('pending');
+  });
+
+  // ── Tabs ─────────────────────────────────────────────────────────────────
+  function switchTab(status) {
+    currentTab = status;
+    ['pending','sent','rejected'].forEach(s => {
+      const el = document.getElementById(`tab-${s}`);
+      el.className = `py-3 text-sm font-medium transition-colors ${s === status ? 'tab-active' : 'tab-inactive'}`;
+    });
+    loadEmails(status);
+  }
+
+  // ── Data ─────────────────────────────────────────────────────────────────
+  function loadCounts() {
+    fetch('/api/emails/counts')
+      .then(r => r.json())
+      .then(c => {
+        document.getElementById('hdr-pending-n').textContent  = c.pending  || 0;
+        document.getElementById('hdr-sent-n').textContent     = c.sent     || 0;
+        document.getElementById('hdr-rejected-n').textContent = c.rejected || 0;
+      });
+  }
+
+  function loadEmails(status) {
+    const container = document.getElementById('email-cards');
+    container.innerHTML = '<p class="text-muted text-sm py-8 text-center">Loading…</p>';
+    fetch(`/api/emails?status=${status}`)
+      .then(r => r.json())
+      .then(emails => renderCards(emails));
+  }
+
+  // ── Rendering ─────────────────────────────────────────────────────────────
+  function renderCards(emails) {
+    const container = document.getElementById('email-cards');
+    if (!emails.length) {
+      container.innerHTML = `
+        <div class="text-center py-20 text-muted">
+          <div class="text-4xl mb-3">📭</div>
+          <p class="text-lg font-medium text-gray-400">Nothing here</p>
+          <p class="text-sm mt-1">Run the agent with <code class="bg-card px-1.5 py-0.5 rounded text-indigo-300">--queue</code> to populate this view.</p>
+        </div>`;
+      return;
+    }
+    container.innerHTML = emails.map(renderCard).join('');
+  }
+
+  function wordCount(text) {
+    return (text || '').trim().split(/\s+/).filter(Boolean).length;
+  }
+
+  function wcBadge(count) {
+    const cls = count <= 75 ? 'wc-ok' : count <= 90 ? 'wc-warn' : 'wc-over';
+    return `<span class="${cls} text-xs font-semibold px-2 py-0.5 rounded-full">${count}w</span>`;
+  }
+
+  function sourceBadge(source) {
+    const map = {
+      apollo:           ['bg-violet-900 text-violet-300', 'Apollo'],
+      website:          ['bg-sky-900 text-sky-300',       'Website'],
+      linkedin_search:  ['bg-blue-900 text-blue-300',     'LinkedIn'],
+    };
+    const [cls, label] = map[source] || ['bg-gray-700 text-gray-300', source || 'unknown'];
+    return `<span class="${cls} text-xs font-medium px-2 py-0.5 rounded-full">${label}</span>`;
+  }
+
+  function statusBadge(status) {
+    const map = {
+      pending:  'bg-amber-900  text-amber-300',
+      sent:     'bg-emerald-900 text-emerald-300',
+      rejected: 'bg-red-900    text-red-300',
+    };
+    return `<span class="${map[status] || 'bg-gray-700 text-gray-300'} text-xs font-medium px-2 py-0.5 rounded-full capitalize">${status}</span>`;
+  }
+
+  function renderCard(e) {
+    const wc  = wordCount(e.body);
+    const isPending = e.status === 'pending';
+
+    const metaParts = [e.industry, e.employee_count ? `${Number(e.employee_count).toLocaleString()} employees` : null]
+      .filter(Boolean).join(' · ');
+
+    const actions = isPending ? `
+      <div class="flex gap-2 pt-1">
+        <button onclick="approve('${e.id}')"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-md transition-colors">
+          ✓ Approve
+        </button>
+        <button onclick="startEdit('${e.id}')"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-700 hover:bg-indigo-600 text-white text-sm font-medium rounded-md transition-colors">
+          ✎ Edit + Approve
+        </button>
+        <button onclick="reject('${e.id}')"
+          class="flex items-center gap-1.5 px-3 py-1.5 bg-transparent border border-border hover:bg-red-900/40 hover:border-red-700 text-gray-400 hover:text-red-300 text-sm font-medium rounded-md transition-colors">
+          ✕ Reject
+        </button>
+      </div>` : `
+      <div class="pt-1">
+        ${statusBadge(e.status)}
+        ${e.gmail_id  ? `<span class="text-xs text-muted ml-2">Gmail: ${e.gmail_id}</span>` : ''}
+        ${e.rejection_reason ? `<span class="text-xs text-muted ml-2">— ${e.rejection_reason}</span>` : ''}
+      </div>`;
+
+    return `
+    <div id="card-${e.id}" class="bg-card border border-border rounded-xl p-5 space-y-4 transition-all">
+
+      <!-- Contact header -->
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="font-semibold text-gray-100 text-base">${esc(e.first_name)} ${esc(e.last_name)}</span>
+            ${sourceBadge(e.source)}
+            ${wcBadge(wc)}
+          </div>
+          <div class="text-sm text-muted mt-0.5">
+            ${esc(e.title || '—')} &nbsp;·&nbsp; ${esc(e.company_name || e.company_domain)}
+          </div>
+          ${metaParts ? `<div class="text-xs text-muted mt-0.5">${esc(metaParts)}</div>` : ''}
+          ${e.linkedin_url ? `<a href="${esc(e.linkedin_url)}" target="_blank" class="text-xs text-indigo-400 hover:underline mt-0.5 inline-block">LinkedIn ↗</a>` : ''}
+        </div>
+        <div class="text-xs text-muted whitespace-nowrap pt-0.5">${e.created_at || ''}</div>
+      </div>
+
+      <!-- Context note -->
+      ${e.context ? `<div class="text-xs text-indigo-300 bg-indigo-950/50 border border-indigo-900 rounded-lg px-3 py-2">📌 ${esc(e.context)}</div>` : ''}
+
+      <!-- Subject (view mode) -->
+      <div id="view-${e.id}">
+        <div class="text-xs uppercase tracking-wide text-muted mb-1">Subject</div>
+        <div class="font-medium text-gray-100">${esc(e.subject)}</div>
+
+        <!-- Body -->
+        <div class="text-xs uppercase tracking-wide text-muted mt-3 mb-1">Body</div>
+        <div class="text-sm text-gray-300 whitespace-pre-wrap leading-relaxed">${esc(e.body)}</div>
+      </div>
+
+      <!-- Edit mode (hidden by default) -->
+      <div id="edit-${e.id}" class="hidden space-y-3">
+        <div>
+          <label class="text-xs uppercase tracking-wide text-muted block mb-1">Subject</label>
+          <input id="subj-${e.id}" type="text" value="${esc(e.subject)}"
+            class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500" />
+        </div>
+        <div>
+          <label class="text-xs uppercase tracking-wide text-muted flex items-center justify-between mb-1">
+            Body
+            <span id="wc-live-${e.id}" class="${wc <= 75 ? 'text-emerald-400' : wc <= 90 ? 'text-amber-400' : 'text-red-400'} font-semibold">${wc} words</span>
+          </label>
+          <textarea id="body-${e.id}" rows="6"
+            oninput="updateWc('${e.id}')"
+            class="w-full bg-surface border border-border rounded-lg px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 font-mono"
+          >${esc(e.body)}</textarea>
+        </div>
+        <div class="flex gap-2">
+          <button onclick="saveAndApprove('${e.id}')"
+            class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-sm font-medium rounded-md transition-colors">
+            ✓ Send
+          </button>
+          <button onclick="cancelEdit('${e.id}')"
+            class="px-3 py-1.5 border border-border hover:bg-gray-700 text-gray-400 text-sm font-medium rounded-md transition-colors">
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      <!-- Actions -->
+      <div id="actions-${e.id}">
+        ${actions}
+      </div>
+
+    </div>`;
+  }
+
+  // ── Actions ───────────────────────────────────────────────────────────────
+  async function approve(id) {
+    const btn = event.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    try {
+      const r = await fetch(`/api/emails/${id}/approve`, { method: 'POST' });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Send failed');
+      removeCard(id);
+      loadCounts();
+      toast('Email sent ✓', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+      btn.disabled = false;
+      btn.textContent = '✓ Approve';
+    }
+  }
+
+  async function reject(id) {
+    const reason = prompt('Rejection reason (optional):') ?? null;
+    if (reason === null) return; // cancelled
+    try {
+      const r = await fetch(`/api/emails/${id}/reject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || 'Reject failed');
+      removeCard(id);
+      loadCounts();
+      toast('Email rejected', 'neutral');
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  }
+
+  function startEdit(id) {
+    document.getElementById(`view-${id}`).classList.add('hidden');
+    document.getElementById(`edit-${id}`).classList.remove('hidden');
+    document.getElementById(`actions-${id}`).classList.add('hidden');
+  }
+
+  function cancelEdit(id) {
+    document.getElementById(`view-${id}`).classList.remove('hidden');
+    document.getElementById(`edit-${id}`).classList.add('hidden');
+    document.getElementById(`actions-${id}`).classList.remove('hidden');
+  }
+
+  async function saveAndApprove(id) {
+    const subject = document.getElementById(`subj-${id}`).value.trim();
+    const body    = document.getElementById(`body-${id}`).value.trim();
+    if (!subject || !body) { toast('Subject and body are required', 'error'); return; }
+
+    // Persist edits first
+    const editRes = await fetch(`/api/emails/${id}/edit`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject, body }),
+    });
+    if (!editRes.ok) { toast('Failed to save edits', 'error'); return; }
+
+    // Then approve
+    const approveRes = await fetch(`/api/emails/${id}/approve`, { method: 'POST' });
+    const data = await approveRes.json();
+    if (!approveRes.ok) { toast(data.error || 'Send failed', 'error'); return; }
+
+    removeCard(id);
+    loadCounts();
+    toast('Email edited and sent ✓', 'success');
+  }
+
+  // ── Live word count ────────────────────────────────────────────────────────
+  function updateWc(id) {
+    const text  = document.getElementById(`body-${id}`).value;
+    const count = wordCount(text);
+    const el    = document.getElementById(`wc-live-${id}`);
+    el.textContent = `${count} words`;
+    el.className = count <= 75 ? 'text-emerald-400 font-semibold'
+                 : count <= 90 ? 'text-amber-400 font-semibold'
+                 :               'text-red-400 font-semibold';
+  }
+
+  // ── Helpers ───────────────────────────────────────────────────────────────
+  function removeCard(id) {
+    const card = document.getElementById(`card-${id}`);
+    if (!card) return;
+    card.classList.add('fade-out');
+    setTimeout(() => card.remove(), 300);
+  }
+
+  function esc(str) {
+    return String(str ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  let _toastTimer;
+  function toast(msg, type = 'neutral') {
+    const el = document.getElementById('toast');
+    const styles = {
+      success: 'bg-emerald-800 text-emerald-100 border border-emerald-600',
+      error:   'bg-red-900    text-red-100    border border-red-700',
+      neutral: 'bg-gray-700   text-gray-100   border border-gray-600',
+    };
+    el.className = `fixed bottom-6 right-6 px-4 py-3 rounded-lg text-sm font-medium shadow-xl z-50 ${styles[type]}`;
+    el.textContent = msg;
+    clearTimeout(_toastTimer);
+    _toastTimer = setTimeout(() => el.classList.add('hidden'), 3500);
+  }
+  </script>
+</body>
+</html>

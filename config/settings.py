@@ -31,4 +31,6 @@ def load_config() -> dict:
         "recontact_ttl_days": int(os.getenv("RECONTACT_TTL_DAYS", "90")),
         # ── Logging ───────────────────────────────────────────────────────────
         "log_file": os.getenv("LOG_FILE", ".agent_state/sent_log.csv"),
+        # ── Queue (dashboard review mode) ─────────────────────────────────────
+        "queue_db": os.getenv("QUEUE_DB", ".agent_state/email_queue.db"),
     }
