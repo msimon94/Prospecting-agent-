@@ -1,5 +1,4 @@
 import os
-from typing import List
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,19 +15,17 @@ def load_config() -> dict:
         "gmail_token_file": os.getenv(
             "GMAIL_TOKEN_FILE", "credentials/gmail_token.json"
         ),
-        # Optional notifications
+        # Hunter.io — recommended for reliable email discovery
+        "hunter_api_key": os.getenv("HUNTER_API_KEY"),
+        # Optional Slack notifications
         "slack_webhook_url": os.getenv("SLACK_WEBHOOK_URL"),
         # Agent identity
         "sender_name": os.getenv("SENDER_NAME", ""),
-        # Behavior
-        "max_emails_per_run": int(os.getenv("MAX_EMAILS_PER_RUN", "50")),
+        # Behaviour
+        "max_emails_per_run": int(os.getenv("MAX_EMAILS_PER_RUN", "25")),
         "dry_run": os.getenv("DRY_RUN", "false").lower() == "true",
+        # How many days before re-contacting a company (default 90)
+        "recontact_ttl_days": int(os.getenv("RECONTACT_TTL_DAYS", "90")),
         # Local log file
         "log_file": os.getenv("LOG_FILE", ".agent_state/sent_log.csv"),
     }
-
-
-def _parse_list(value: str) -> List[str]:
-    if not value:
-        return []
-    return [v.strip() for v in value.split(",") if v.strip()]

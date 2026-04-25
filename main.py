@@ -3,10 +3,10 @@
 AI Prospecting Agent CLI
 
 Usage:
-  python main.py auth                          # Authorize Gmail (run once)
-  python main.py run contacts.csv              # Run against a contact list
-  python main.py run contacts.csv --dry-run    # Preview emails, don't send
-  python main.py run contacts.csv --max 20     # Cap emails this run
+  python main.py auth                           # Authorize Gmail (run once)
+  python main.py run companies.csv              # Run against a company list
+  python main.py run companies.csv --dry-run    # Preview emails, don't send
+  python main.py run companies.csv --max 10     # Cap emails this run
 """
 import asyncio
 
@@ -22,13 +22,13 @@ console = Console()
 
 @click.group()
 def cli():
-    """AI Prospecting Agent — import a list, send personalized outreach."""
+    """AI Prospecting Agent — import a company list, auto-find contacts, send personalized outreach."""
     pass
 
 
 @cli.command()
 def auth():
-    """Run the Gmail OAuth flow and save your token."""
+    """Run the Gmail OAuth flow and save your token (do this once)."""
     config = load_config()
     client = GmailClient(
         credentials_file=config["gmail_credentials_file"],
@@ -41,16 +41,18 @@ def auth():
 
 
 @cli.command()
-@click.argument("contact_file", type=click.Path(exists=True))
-@click.option("--dry-run", is_flag=True, help="Generate emails but don't send them.")
-@click.option("--max", "max_emails", type=int, default=None, help="Cap emails this run.")
-def run(contact_file: str, dry_run: bool, max_emails: int):
+@click.argument("company_file", type=click.Path(exists=True))
+@click.option("--dry-run", is_flag=True, help="Find contacts and generate emails, but don't send.")
+@click.option("--max", "max_emails", type=int, default=None, help="Cap companies processed this run.")
+def run(company_file: str, dry_run: bool, max_emails: int):
     """
-    Generate and send personalized emails to every contact in CONTACT_FILE.
+    For each company in COMPANY_FILE: discover the best contact
+    (CEO/CRO/VP Sales/Marketing/Ops), generate a personalized email
+    with Claude, and send it from your Gmail inbox.
 
-    CONTACT_FILE can be a .csv or .xlsx file. Required columns:
-    first_name, last_name, email, company.
-    Optional: title, industry, employee_count, context/notes.
+    COMPANY_FILE can be .csv or .xlsx.
+    Required columns: domain (or website).
+    Optional: company_name, industry, employee_count, context/notes.
     """
     config = load_config()
     if dry_run:
@@ -59,7 +61,7 @@ def run(contact_file: str, dry_run: bool, max_emails: int):
         config["max_emails_per_run"] = max_emails
 
     agent = ProspectingAgent(config)
-    asyncio.run(agent.run(contact_file))
+    asyncio.run(agent.run(company_file))
 
 
 if __name__ == "__main__":

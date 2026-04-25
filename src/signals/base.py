@@ -2,8 +2,15 @@ from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 
 
+class Company(BaseModel):
+    name: str
+    domain: str
+    industry: Optional[str] = None
+    employee_count: Optional[int] = None
+    context: Optional[str] = None  # free-text personalization notes from CSV
+
+
 class Contact(BaseModel):
-    id: Optional[str] = None
     first_name: str
     last_name: str
     email: Optional[str] = None
@@ -11,9 +18,7 @@ class Contact(BaseModel):
     company_name: str = ""
     company_domain: str = ""
     linkedin_url: Optional[str] = None
-    phone: Optional[str] = None
-    # Catches industry, employee_count, and any free-text "context" / "notes"
-    # column from the imported list — used by the email generator.
+    source: str = ""  # "hunter" | "website" | "linkedin_search"
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
 
